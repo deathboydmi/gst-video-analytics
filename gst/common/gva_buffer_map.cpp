@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -11,11 +11,6 @@
 #include <sstream>
 #include <stdexcept>
 
-#define UNUSED(x) (void)(x)
-
-#ifdef USE_VPUSMM
-#include <vpusmm/vpusmm.h>
-#endif
 #include <inference_backend/logger.h>
 
 using namespace InferenceBackend;
@@ -47,50 +42,6 @@ inline int gstFormatToFourCC(int format) {
     return 0;
 }
 
-#ifdef USE_VPUSMM
-int gva_dmabuffer_import(GstBuffer *buffer) {
-    int fd = 0;
-    auto mem = GstMemoryUniquePtr(gst_buffer_get_memory(buffer, 0), gst_memory_unref);
-    try {
-        if (not mem.get())
-            throw std::runtime_error("Failed to get GstBuffer memory");
-
-        if (not gst_is_dmabuf_memory(mem.get()))
-            throw std::runtime_error("GstBuffer memory is not DMA buffer");
-
-        int fd = gst_dmabuf_memory_get_fd(mem.get());
-        if (fd <= 0)
-            throw std::runtime_error("Failed to get file desc associated with GstBuffer memory");
-
-        long int phyAddr = vpusmm_import_dmabuf(fd, VPU_DEFAULT);
-        if (phyAddr <= 0)
-            throw std::runtime_error("Failed to import DMA buffer from file desc");
-    } catch (const std::exception &e) {
-        std::throw_with_nested(std::runtime_error("Failed to import DMA buffer memory from GstBuffer"));
-    }
-    return fd;
-}
-
-void gva_dmabuffer_unimport(GstBuffer *buffer) {
-    auto mem = GstMemoryUniquePtr(gst_buffer_get_memory(buffer, 0), gst_memory_unref);
-    try {
-        if (not mem.get())
-            throw std::runtime_error("Failed to get GstBuffer memory");
-
-        if (not gst_is_dmabuf_memory(mem.get()))
-            throw std::runtime_error("GstBuffer memory is not DMA buffer");
-
-        int fd = gst_dmabuf_memory_get_fd(mem.get());
-        if (fd <= 0)
-            throw std::runtime_error("Failed to get file desc associated with GstBuffer memory");
-
-        vpusmm_unimport_dmabuf(fd);
-    } catch (const std::exception &e) {
-        std::throw_with_nested(std::runtime_error("Failed to unimport DMA buffer memory from GstBuffer"));
-    }
-}
-#endif
-
 void gva_buffer_map(GstBuffer *buffer, Image &image, BufferMapContext &map_context, GstVideoInfo *info,
                     MemoryType memory_type, GstMapFlags map_flags) {
     ITT_TASK(__FUNCTION__);
@@ -105,11 +56,13 @@ void gva_buffer_map(GstBuffer *buffer, Image &image, BufferMapContext &map_conte
             throw std::logic_error("Image planes number " + std::to_string(n_planes) + " isn't supported");
 
         image.format = gstFormatToFourCC(GST_VIDEO_INFO_FORMAT(info));
-        image.width = static_cast<int>(GST_VIDEO_INFO_WIDTH(info));
-        image.height = static_cast<int>(GST_VIDEO_INFO_HEIGHT(info));
+        image.width = static_cast<uint32_t>(GST_VIDEO_INFO_WIDTH(info));
+        image.height = static_cast<uint32_t>(GST_VIDEO_INFO_HEIGHT(info));
+        image.size = GST_VIDEO_INFO_SIZE(info);
         image.type = memory_type;
         for (guint i = 0; i < n_planes; ++i) {
             image.stride[i] = GST_VIDEO_INFO_PLANE_STRIDE(info, i);
+            image.offsets[i] = GST_VIDEO_INFO_PLANE_OFFSET(info, i);
         }
 
         switch (memory_type) {
@@ -122,19 +75,28 @@ void gva_buffer_map(GstBuffer *buffer, Image &image, BufferMapContext &map_conte
             }
             for (guint i = 0; i < n_planes; ++i) {
                 image.stride[i] = GST_VIDEO_FRAME_PLANE_STRIDE(&map_context.frame, i);
+                image.offsets[i] = GST_VIDEO_FRAME_PLANE_OFFSET(&map_context.frame, i);
             }
-#ifdef USE_VPUSMM
-            gva_dmabuffer_import(buffer);
+#ifdef ENABLE_VPUX
+            auto mem = GstMemoryUniquePtr(gst_buffer_get_memory(buffer, 0), gst_memory_unref);
+            if (not mem.get())
+                throw std::runtime_error("Failed to get GstBuffer memory");
+            if (gst_is_dmabuf_memory(mem.get())) {
+                int dma_fd = gst_dmabuf_memory_get_fd(mem.get());
+                if (dma_fd <= 0)
+                    throw std::runtime_error("Failed to get file desc associated with GstBuffer memory");
+                image.dma_fd = dma_fd;
+            }
 #endif
             break;
         }
         case MemoryType::DMA_BUFFER: {
-            auto mem = GstMemoryUniquePtr(gst_buffer_get_memory(buffer, 0), gst_memory_unref);
-            if (not mem.get())
+            GstMemory *mem = gst_buffer_peek_memory(buffer, 0);
+            if (not mem)
                 throw std::runtime_error("Failed to get GstBuffer memory");
-            image.dma_fd = gst_fd_memory_get_fd(mem.get()); // gst_dmabuf_memory_get_fd?
-            if (image.dma_fd <= 0)
-                throw std::runtime_error("Failed to import DMA buffer memory");
+            image.dma_fd = gst_dmabuf_memory_get_fd(mem);
+            if (image.dma_fd < 0)
+                throw std::runtime_error("Failed to import DMA buffer FD");
             break;
         }
         case MemoryType::VAAPI:
@@ -162,13 +124,7 @@ void gva_buffer_map(GstBuffer *buffer, Image &image, BufferMapContext &map_conte
     }
 }
 
-void gva_buffer_unmap(GstBuffer *buffer, Image &, BufferMapContext &map_context) {
-    if (map_context.frame.buffer) {
-#if defined(USE_VPUSMM)
-        gva_dmabuffer_unimport(buffer);
-#else
-        UNUSED(buffer);
-#endif
+void gva_buffer_unmap(BufferMapContext &map_context) {
+    if (map_context.frame.buffer)
         gst_video_frame_unmap(&map_context.frame);
-    }
 }

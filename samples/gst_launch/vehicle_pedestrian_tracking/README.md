@@ -1,6 +1,6 @@
 # Vehicle and Pedestrian Tracking Sample (gst-launch command line)
 
-This sample demonstrates [gvatrack](./gvatrack.md) element and object tracking capabilities on example of person and vehicle tracking. Object tracking increases performance by running inference on object detection and classification models less frequently (not every frame).
+This sample demonstrates [gvatrack](https://github.com/openvinotoolkit/dlstreamer_gst/wiki/gvatrack) element and object tracking capabilities on example of person and vehicle tracking. Object tracking increases performance by running inference on object detection and classification models less frequently (not every frame).
 
 ## How It Works
 The sample utilizes GStreamer command-line tool `gst-launch-1.0` which can build and run GStreamer pipeline described in a string format.
@@ -16,16 +16,16 @@ Overall this sample builds GStreamer pipeline of the following elements
 * `filesrc` or `urisourcebin` or `v4l2src` for input from file/URL/web-camera
 * `decodebin` for video decoding
 * `videoconvert` for converting video frame into different color formats
-* [gvadetect](./gvadetect.md) for person and vehicle detection based on OpenVINO™ Inference Engine
-* [gvatrack](./gvatrack.md) for tracking objects
-* [gvaclassify](./gvaclassify.md) inserted into pipeline twice for person and vehicle classification
-* [gvawatermark](./gvawatermark.md) for bounding boxes and labels visualization
+* [gvadetect](https://github.com/openvinotoolkit/dlstreamer_gst/wiki/gvadetect) for person and vehicle detection based on OpenVINO™ Toolkit Inference Engine
+* [gvatrack](https://github.com/openvinotoolkit/dlstreamer_gst/wiki/gvatrack) for tracking objects
+* [gvaclassify](https://github.com/openvinotoolkit/dlstreamer_gst/wiki/gvaclassify) inserted into pipeline twice for person and vehicle classification
+* [gvawatermark](https://github.com/openvinotoolkit/dlstreamer_gst/wiki/gvawatermark) for bounding boxes and labels visualization
 * `fpsdisplaysink` for rendering output video into screen
 > **NOTE**: `sync=false` property in `fpsdisplaysink` element disables real-time synchronization so pipeline runs as fast as possible
 
 ## Models
 
-The sample uses by default the following pre-trained models from OpenVINO™ [Open Model Zoo](https://github.com/opencv/open_model_zoo)
+The sample uses by default the following pre-trained models from OpenVINO™ Toolkit [Open Model Zoo](https://github.com/openvinotoolkit/open_model_zoo)
 *   __person-vehicle-bike-detection-crossroad-0078__ is primary detection network for detecting persons, vehicles and bikes
 *   __person-attributes-recognition-crossroad-0230__ classifies person attributes
 *   __vehicle-attributes-recognition-barrier-0039__ classifies vehicle attributes
@@ -37,21 +37,25 @@ The sample contains `model_proc` subfolder with .json files for each model with 
 ## Running
 
 ```sh
-./vehicle_pedestrian_tracking.sh [INPUT_VIDEO] [DETECTION_INTERVAL] [INFERENCE_PRECISION]
+./vehicle_pedestrian_tracking.sh [INPUT_VIDEO] [DETECTION_INTERVAL] [DEVICE] [SINK_ELEMENT]
 ```
 
-The sample takes three command-line parameters:
+The sample takes four command-line parameters:
 1. [INPUT_VIDEO] to specify input video.
 The input could be
     * video file path
     * web camera device (ex. /dev/video0)
-    * URL of RTSP camera (URL starts with `rtsp://`) or other streaming source (ex `http://`)
+    * URL of RTSP camera (URL starts with `rtsp://`) or other streaming source (ex `http://`)  
+If parameter is not specified, the sample by default streams video example from HTTPS link (utilizing `urisourcebin` element) so requires internet conection.
 2. [DETECTION_INTERVAL] to specify interval between inference requests. An interval of N performs inference on every Nth frame. Default value is 10
-3. [INFERENCE_PRECISION] to specify precision of the used models, it could be
-    * FP32 (Default)
-    * FP16
-    * INT8
-    * FP32-INT8
+3. [DEVICE] to specify device for detection and classification.  
+    Please refer to OpenVINO™ toolkit documentation for supported devices.  
+    https://docs.openvinotoolkit.org/latest/openvino_docs_IE_DG_supported_plugins_Supported_Devices.html  
+    You can find what devices are supported on your system by running following OpenVINO™ toolkit sample:  
+    https://docs.openvinotoolkit.org/latest/openvino_inference_engine_ie_bridges_python_sample_hello_query_device_README.html
+4. [SINK_ELEMENT] to choose between render mode and fps throughput mode:
+    * display - render (default)
+    * fps - FPS only
 
 ## Sample Output
 

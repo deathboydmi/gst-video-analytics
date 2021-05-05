@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -19,7 +19,10 @@ typedef struct ITracker ITracker;
 
 G_BEGIN_DECLS
 
-ITracker *acquire_tracker_instance(const GstVideoInfo *info, GstGvaTrackingType tracking_type, GError **error);
+struct _GstGvaTrack;
+typedef struct _GstGvaTrack GstGvaTrack;
+
+ITracker *acquire_tracker_instance(const GstGvaTrack *gva_track, GError **error);
 void transform_tracked_objects(ITracker *tracker, GstBuffer *buffer, GError **error);
 void release_tracker_instance(ITracker *tracker);
 

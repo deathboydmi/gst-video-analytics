@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -10,7 +10,7 @@ set (TARGET_NAME "image_inference")
 
 add_subdirectory(openvino)
 
-if(${HAVE_VAAPI})
+if(${ENABLE_VAAPI})
         add_subdirectory(async_with_va_api)
 endif()
 
@@ -39,6 +39,7 @@ PUBLIC
 
 target_link_libraries(${TARGET_NAME}
 PUBLIC
-        IE::inference_engine
+        ${InferenceEngine_LIBRARIES}
         logger
+        utils
 )

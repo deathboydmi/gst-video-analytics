@@ -86,10 +86,10 @@ def create_launch_string():
 
     return "{}={} ! decodebin ! \
     videoconvert n-threads=4 ! capsfilter caps=\"video/x-raw,format=BGRx\" ! \
-    gvadetect model={} device=CPU batch-size=1 ! queue ! \
-    gvaclassify model={} device=CPU batch-size=1 ! queue ! \
-    gvaclassify model={} device=CPU batch-size=1 ! queue ! \
-    gvaclassify model={} batch-size=1 ! queue ! \
+    gvadetect model={} device=CPU ! queue ! \
+    gvainference model={} device=CPU inference-region=roi-list ! queue ! \
+    gvainference model={} device=CPU inference-region=roi-list ! queue ! \
+    gvainference model={} device=CPU inference-region=roi-list ! queue ! \
     gvawatermark name=gvawatermark ! videoconvert n-threads=4 ! \
     fpsdisplaysink video-sink=xvimagesink sync=false".format(source, args.input, args.detection_model,
                                                              args.classification_model1, args.classification_model2,
@@ -111,7 +111,9 @@ def bus_call(bus, message, pipeline):
         pipeline.set_state(Gst.State.NULL)
         sys.exit()
     elif t == Gst.MessageType.ERROR:
-        print("error {}".format(message))
+        err, debug = message.parse_error()
+        print("Error:\n{}\nAdditional debug info:\n{}\n".format(err, debug))
+        pipeline.set_state(Gst.State.NULL)
         sys.exit()
     else:
         pass

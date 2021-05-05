@@ -1,6 +1,6 @@
 # Benchmark Sample
 
-This sample demonstrates [gvafpscounter](./gvafpscounter.md) element used to measure overall performance of single-channel or multi-channel video analytics pipelines.
+This sample demonstrates [gvafpscounter](https://github.com/openvinotoolkit/dlstreamer_gst/wiki/gvafpscounter) element used to measure overall performance of single-channel or multi-channel video analytics pipelines.
 
 The sample outputs FPS (Frames Per Second) every second and average FPS on exit.
 
@@ -23,7 +23,7 @@ Modify `MODEL=` line in the script to benchmark pipeline on another model.
 
 You can download video file example by command
 ```sh
-wget https://github.com/intel-iot-devkit/sample-videos/raw/master/bolt-detection.mp4
+curl https://github.com/intel-iot-devkit/sample-videos/raw/master/head-pose-face-detection-female-and-male.mp4\" --output /path/to/your/video/head-pose-face-detection-female-and-male.mp4
 ```
 or use any other media/video file.
 
@@ -38,12 +38,12 @@ The sample takes one to four command-line parameters (last three are optional):
 2. [DECODE_DEVICE] to specify device for video decode, could be
     * CPU (Default)
     * GPU
-3. [INFERENCE_DEVICE] to specify inference device, could be any device supported by OpenVINO
+3. [INFERENCE_DEVICE] to specify inference device, could be any device supported by OpenVINO™ Toolkit
     * CPU (Default)
     * GPU
     * HDDL
     * ...
-4. [CHANNELS_COUNT] number simultaneous channels to benchmark 
+4. [CHANNELS_COUNT] number simultaneous channels to benchmark
 
 ## Sample Output
 

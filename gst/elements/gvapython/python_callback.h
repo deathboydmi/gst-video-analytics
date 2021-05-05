@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -13,10 +13,9 @@
 
 class PythonCallback {
     PyObjectWrapper py_function;
-    PyObjectWrapper py_videoframe_class;
+    PyObjectWrapper py_frame_class;
     PyObjectWrapper py_caps;
     PyObjectWrapper py_class;
-    PyObjectWrapper py_json_load_s;
     std::string module_name;
 
   public:

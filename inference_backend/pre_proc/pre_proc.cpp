@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -12,21 +12,21 @@
 
 namespace InferenceBackend {
 
-PreProc *PreProc::Create(PreProcessType type) {
-    PreProc *pProc = nullptr;
+ImagePreprocessor *ImagePreprocessor::Create(ImagePreprocessorType type) {
+    ImagePreprocessor *p = nullptr;
     switch (type) {
-    case PreProcessType::OpenCV:
-        pProc = CreatePreProcOpenCV();
+    case ImagePreprocessorType::OPENCV:
+        p = CreatePreProcOpenCV();
         break;
-#ifdef HAVE_VAAPI
-    case PreProcessType::VAAPI:
-        pProc = CreatePreProcOpenCV();
+#ifdef ENABLE_VAAPI
+    case ImagePreprocessorType::VAAPI_SYSTEM:
+        p = CreatePreProcOpenCV();
         break;
 #endif
     }
-    if (pProc == nullptr)
-        throw std::runtime_error("Failed to allocate OpenCV preprocessor");
-    return pProc;
+    if (p == nullptr)
+        throw std::runtime_error("Failed to allocate Image preprocessor");
+    return p;
 }
 
 int GetPlanesCount(int fourcc) {
@@ -95,9 +95,28 @@ Image ApplyCrop(const Image &src) {
         dst.planes[0] = src.planes[0] + src.rect.y * src.stride[0] + src.rect.x * channels;
         break;
     }
-    default: { throw std::runtime_error("Unsupported image format for crop"); }
+    default: {
+        throw std::invalid_argument("Unsupported image format for crop");
+        break;
+    }
     }
 
     return dst;
 }
+
+bool ImagePreprocessor::doNeedCustomImageConvert(const InputImageLayerDesc::Ptr &pre_proc_info) {
+    if (pre_proc_info)
+        if (pre_proc_info->isDefined())
+            return true;
+    return false;
+}
+
+bool ImagePreprocessor::doNeedPreProcessing(const Image &src, Image &dst) {
+    if (src.format == dst.format and (src.format == FourCC::FOURCC_RGBP or src.format == FourCC::FOURCC_RGBP_F32) and
+        src.width == dst.width and src.height == dst.height) {
+        return true;
+    }
+    return false;
+}
+
 } // namespace InferenceBackend

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -22,29 +22,39 @@ void fill_roi_params_from_history(struct ClassificationHistory *classification_h
 G_END_DECLS
 
 #ifdef __cplusplus
+#include "gst_smart_pointer_types.hpp"
+#include "lru_cache.h"
+
 #include <map>
 #include <mutex>
 
-struct ClassificationHistory {
-    struct ROIClassificationHistory {
-        unsigned frame_of_last_update;
-        std::map<std::string, GstStructure *> layers_to_roi_params;
+const size_t CLASSIFICATION_HISTORY_SIZE = 100;
 
-        ~ROIClassificationHistory() {
-            for (auto l : layers_to_roi_params)
-                gst_structure_free(l.second);
+struct ClassificationHistory {
+  public:
+    struct ROIClassificationHistory {
+        uint64_t frame_of_last_update;
+        std::map<std::string, GstStructureSharedPtr> layers_to_roi_params;
+
+        ROIClassificationHistory(uint64_t frame_of_last_update = {},
+                                 std::map<std::string, GstStructureSharedPtr> layers_to_roi_params = {})
+            : frame_of_last_update(frame_of_last_update), layers_to_roi_params(layers_to_roi_params) {
         }
     };
 
-    GstGvaClassify *gva_classify;
-    unsigned current_num_frame;
-    std::map<int, ROIClassificationHistory> history;
-    std::mutex history_mutex;
-
     ClassificationHistory(GstGvaClassify *gva_classify);
 
-    bool IsROIClassificationNeeded(GstVideoRegionOfInterestMeta *roi, unsigned current_num_frame);
-    void UpdateROIParams(int roi_id, GstStructure *roi_param);
+    bool IsROIClassificationNeeded(GstVideoRegionOfInterestMeta *roi, uint64_t current_num_frame);
+    void UpdateROIParams(int roi_id, const GstStructure *roi_param);
     void FillROIParams(GstBuffer *buffer);
+    LRUCache<int, ROIClassificationHistory> &GetHistory();
+
+  private:
+    void CheckExistingAndReaddObjectId(int roi_id);
+
+    GstGvaClassify *gva_classify;
+    uint64_t current_num_frame;
+    LRUCache<int, ROIClassificationHistory> history;
+    std::mutex history_mutex;
 };
 #endif

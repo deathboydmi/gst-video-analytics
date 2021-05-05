@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -10,26 +10,33 @@ set (TARGET_NAME "inference_elements")
 
 find_package(OpenCV REQUIRED core imgproc)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GSTREAMER gstreamer-1.0>=1.14 REQUIRED)
-pkg_check_modules(GSTVIDEO gstreamer-video-1.0>=1.14 REQUIRED)
+pkg_check_modules(GSTREAMER gstreamer-1.0>=1.16 REQUIRED)
+pkg_check_modules(GSTVIDEO gstreamer-video-1.0>=1.16 REQUIRED)
 pkg_check_modules(GSTALLOC gstreamer-allocators-1.0 REQUIRED)
 
 file (GLOB MAIN_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/base/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/base/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/gvaclassify/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gvaclassify/*.c
     ${CMAKE_CURRENT_SOURCE_DIR}/gvadetect/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gvadetect/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/gvadetect/converters/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gvainference/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gvainference/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/model_proc/*.cpp
 )
 
 file (GLOB MAIN_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/base/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gvaclassify/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gvadetect/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gvadetect/converters/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gvainference/*.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/model_proc/*.h
 )
 
 add_library(${TARGET_NAME} STATIC ${MAIN_SRC} ${MAIN_HEADERS})
@@ -42,9 +49,11 @@ target_include_directories(${TARGET_NAME}
 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/base/
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/
     ${CMAKE_CURRENT_SOURCE_DIR}/gvaclassify/
     ${CMAKE_CURRENT_SOURCE_DIR}/gvadetect/
     ${CMAKE_CURRENT_SOURCE_DIR}/gvainference/
+    ${CMAKE_CURRENT_SOURCE_DIR}/model_proc/
 PRIVATE
     ${GSTREAMER_INCLUDE_DIRS}
     ${GSTVIDEO_INCLUDE_DIRS}
@@ -53,10 +62,10 @@ PRIVATE
 
 target_link_libraries(${TARGET_NAME}
 PRIVATE
+    ${GSTREAMER_LDFLAGS}
+    ${GSTVIDEO_LDFLAGS}
+    ${GSTALLOC_LDFLAGS}
     ${OpenCV_LIBS}
-    ${GSTREAMER_LIBRARIES}
-    ${GSTVIDEO_LIBRARIES}
-    ${GSTALLOC_LIBRARIES}
     common
     image_inference
     image_inference_openvino
@@ -65,8 +74,11 @@ PRIVATE
     logger
     json-hpp
     json-schema-validator
+PUBLIC
+    runtime_feature_toggling
+    common
 )
 
-if(${HAVE_VAAPI})
+if(${ENABLE_VAAPI})
     target_link_libraries(${TARGET_NAME} PRIVATE va_api_wrapper image_inference_async)
 endif()

@@ -7,11 +7,8 @@
 cmake_minimum_required(VERSION 3.1)
 
 add_subdirectory(itt)
-
-if(${ENABLE_VAS_TRACKER})
+if(${ENABLE_VAS_TRACKER} AND ${DOWNLOAD_VAS_TRACKER})
     add_subdirectory(vas)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/vas/DownloadVas.cmake)
-    add_dependencies(vas getexternalvas)
 endif()
 
 # Populate thirdparty/json dependency

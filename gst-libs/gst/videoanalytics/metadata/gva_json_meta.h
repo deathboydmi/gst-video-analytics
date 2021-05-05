@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -90,7 +90,7 @@ gchar *get_json_message(GstGVAJSONMeta *meta);
  * @param message message
  * @return void
  */
-void set_json_message(GstGVAJSONMeta *meta, gchar *message);
+void set_json_message(GstGVAJSONMeta *meta, const gchar *message);
 
 G_END_DECLS
 

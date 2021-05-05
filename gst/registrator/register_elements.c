@@ -12,9 +12,9 @@
 #include "gstgvadetect.h"
 #include "gstgvafpscounter.h"
 #include "gstgvainference.h"
+#include "gstgvametaaggregate.h"
 #include "gstgvametaconvert.h"
 #include "gstgvametapublish.h"
-#include "gstgvatrack.h"
 #include "gstgvawatermark.h"
 
 #include "gva_json_meta.h"
@@ -42,7 +42,7 @@ static gboolean plugin_init(GstPlugin *plugin) {
     if (!gst_element_register(plugin, "gvametapublish", GST_RANK_NONE, GST_TYPE_GVA_META_PUBLISH))
         return FALSE;
 
-    if (!gst_element_register(plugin, "gvatrack", GST_RANK_NONE, GST_TYPE_GVA_TRACK))
+    if (!gst_element_register(plugin, "gvametaaggregate", GST_RANK_NONE, GST_TYPE_GVA_META_AGGREGATE))
         return FALSE;
 
     // register metadata

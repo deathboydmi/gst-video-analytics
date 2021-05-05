@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -14,7 +14,8 @@
 extern "C" {
 #endif
 
-gboolean draw_label(GstGvaWatermark *gvawatermark, GstBuffer *buffer);
+void init(GstVideoInfo *info);
+gboolean draw(GstGvaWatermark *gvawatermark, GstBuffer *buffer);
 
 #ifdef __cplusplus
 }

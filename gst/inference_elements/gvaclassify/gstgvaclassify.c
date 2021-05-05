@@ -1,31 +1,34 @@
 /*******************************************************************************
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
+
+#include "gstgvaclassify.h"
+
+#include "classification_history.h"
+#include "classification_post_processors_c.h"
+#include "pre_processors.h"
+
+#include "config.h"
+#include "utils.h"
+
+#include "gva_caps.h"
 
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
-#include "config.h"
-
-#include "classification_history.h"
-#include "gstgvaclassify.h"
-#include "gva_caps.h"
-#include "post_processors.h"
-#include "pre_processors.h"
-
 #define ELEMENT_LONG_NAME "Object classification (requires GstVideoRegionOfInterestMeta on input)"
-#define ELEMENT_DESCRIPTION ELEMENT_LONG_NAME
+#define ELEMENT_DESCRIPTION                                                                                            \
+    "Performs object classification. Accepts the ROI or full frame as an input and "                                   \
+    "outputs classification results with metadata."
 
 enum {
     PROP_0,
-    PROP_OBJECT_CLASS,
     PROP_RECLASSIFY_INTERVAL,
 };
 
-#define DEFAULT_OBJECT_CLASS ""
 #define DEFAULT_RECLASSIFY_INTERVAL 1
 #define DEFAULT_MIN_RECLASSIFY_INTERVAL 0
 #define DEFAULT_MAX_RECLASSIFY_INTERVAL UINT_MAX
@@ -37,11 +40,12 @@ G_DEFINE_TYPE_WITH_CODE(GstGvaClassify, gst_gva_classify, GST_TYPE_GVA_BASE_INFE
                         GST_DEBUG_CATEGORY_INIT(gst_gva_classify_debug_category, "gvaclassify", 0,
                                                 "debug category for gvaclassify element"));
 
-#define UNUSED(x) (void)(x)
-
 static GstPadProbeReturn FillROIParamsCallback(GstPad *pad, GstPadProbeInfo *info, gpointer user_data);
 static void gst_gva_classify_finalize(GObject *);
 static void gst_gva_classify_cleanup(GstGvaClassify *);
+static gboolean gst_gva_classify_check_properties_correctness(GstGvaClassify *gvaclassify);
+static gboolean gst_gva_classify_start(GstBaseTransform *trans);
+static void on_base_inference_initialized(GvaBaseInference *base_inference);
 
 void gst_gva_classify_set_property(GObject *object, guint property_id, const GValue *value, GParamSpec *pspec) {
     GstGvaClassify *gvaclassify = (GstGvaClassify *)(object);
@@ -51,11 +55,6 @@ void gst_gva_classify_set_property(GObject *object, guint property_id, const GVa
     static gulong probe_id = 0;
 
     switch (property_id) {
-    case PROP_OBJECT_CLASS: {
-        g_free(gvaclassify->object_class);
-        gvaclassify->object_class = g_value_dup_string(value);
-        break;
-    }
     case PROP_RECLASSIFY_INTERVAL: {
         guint newValue = g_value_get_uint(value);
         guint oldValue = gvaclassify->reclassify_interval;
@@ -85,9 +84,6 @@ void gst_gva_classify_get_property(GObject *object, guint property_id, GValue *v
     GST_DEBUG_OBJECT(gvaclassify, "get_property");
 
     switch (property_id) {
-    case PROP_OBJECT_CLASS:
-        g_value_set_string(value, gvaclassify->object_class);
-        break;
     case PROP_RECLASSIFY_INTERVAL:
         g_value_set_uint(value, gvaclassify->reclassify_interval);
         break;
@@ -113,11 +109,12 @@ void gst_gva_classify_class_init(GstGvaClassifyClass *gvaclassify_class) {
     gobject_class->get_property = gst_gva_classify_get_property;
     gobject_class->finalize = gst_gva_classify_finalize;
 
-    g_object_class_install_property(
-        gobject_class, PROP_OBJECT_CLASS,
-        g_param_spec_string("object-class", "ObjectClass",
-                            "Specifies the Region of Interest type for which this classifier will run",
-                            DEFAULT_OBJECT_CLASS, (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+    GvaBaseInferenceClass *base_inference_class = GVA_BASE_INFERENCE_CLASS(gvaclassify_class);
+    base_inference_class->on_initialized = on_base_inference_initialized;
+
+    GstBaseTransformClass *base_transform_class = GST_BASE_TRANSFORM_CLASS(gvaclassify_class);
+    base_transform_class->start = GST_DEBUG_FUNCPTR(gst_gva_classify_start);
+
     g_object_class_install_property(
         gobject_class, PROP_RECLASSIFY_INTERVAL,
         g_param_spec_uint(
@@ -142,16 +139,14 @@ void gst_gva_classify_init(GstGvaClassify *gvaclassify) {
         return;
     gst_gva_classify_cleanup(gvaclassify);
 
-    gvaclassify->base_inference.is_full_frame = FALSE;
-    gvaclassify->object_class = g_strdup(DEFAULT_OBJECT_CLASS);
+    gvaclassify->base_inference.type = GST_GVA_CLASSIFY_TYPE;
+    gvaclassify->base_inference.inference_region = ROI_LIST;
     gvaclassify->reclassify_interval = DEFAULT_RECLASSIFY_INTERVAL;
     gvaclassify->classification_history = create_classification_history(gvaclassify);
     if (gvaclassify->classification_history == NULL)
         return;
 
-    gvaclassify->base_inference.get_roi_pre_proc = INPUT_PRE_PROCESS;
-    gvaclassify->base_inference.post_proc = EXTRACT_CLASSIFICATION_RESULTS;
-    gvaclassify->base_inference.is_roi_classification_needed = IS_ROI_CLASSIFICATION_NEEDED;
+    gvaclassify->base_inference.specific_roi_filter = IS_ROI_CLASSIFICATION_NEEDED;
 }
 
 void gst_gva_classify_cleanup(GstGvaClassify *gvaclassify) {
@@ -165,8 +160,10 @@ void gst_gva_classify_cleanup(GstGvaClassify *gvaclassify) {
         gvaclassify->classification_history = NULL;
     }
 
-    g_free(gvaclassify->object_class);
-    gvaclassify->object_class = NULL;
+    if (gvaclassify->base_inference.post_proc) {
+        releaseClassificationPostProcessor(gvaclassify->base_inference.post_proc);
+        gvaclassify->base_inference.post_proc = NULL;
+    }
 }
 
 void gst_gva_classify_finalize(GObject *object) {
@@ -186,4 +183,34 @@ GstPadProbeReturn FillROIParamsCallback(GstPad *pad, GstPadProbeInfo *info, gpoi
         fill_roi_params_from_history((struct ClassificationHistory *)user_data, buffer);
 
     return GST_PAD_PROBE_OK;
+}
+
+gboolean gst_gva_classify_check_properties_correctness(GstGvaClassify *gvaclassify) {
+    GvaBaseInference *base_inference = GVA_BASE_INFERENCE(gvaclassify);
+
+    if (base_inference->inference_region == FULL_FRAME && gvaclassify->reclassify_interval != 1) {
+        GST_ERROR_OBJECT(gvaclassify,
+                         ("You cannot use 'reclassify-interval' property on gvaclassify if you set 'full-frame' for "
+                          "'inference-region' property."));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+gboolean gst_gva_classify_start(GstBaseTransform *trans) {
+    GstGvaClassify *gvaclassify = (GstGvaClassify *)(trans);
+
+    if (!gst_gva_classify_check_properties_correctness(gvaclassify))
+        return FALSE;
+
+    return GST_BASE_TRANSFORM_CLASS(gst_gva_classify_parent_class)->start(trans);
+}
+
+void on_base_inference_initialized(GvaBaseInference *base_inference) {
+    GstGvaClassify *gvaclassify = GST_GVA_CLASSIFY(base_inference);
+
+    GST_DEBUG_OBJECT(gvaclassify, "on_base_inference_initialized");
+
+    base_inference->post_proc = createClassificationPostProcessor(base_inference->inference);
 }

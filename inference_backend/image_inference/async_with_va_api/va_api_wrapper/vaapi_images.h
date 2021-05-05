@@ -1,10 +1,14 @@
 /*******************************************************************************
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 #pragma once
+
+#include "vaapi_context.h"
+#include "vaapi_image_map.h"
+#include "vaapi_utils.h"
 
 #include "inference_backend/image.h"
 
@@ -12,9 +16,6 @@
 #include <future>
 #include <memory>
 #include <vector>
-
-#include "vaapi_context.h"
-#include "vaapi_image_map.h"
 
 namespace InferenceBackend {
 
@@ -25,9 +26,9 @@ struct VaApiImage {
     bool completed = true;
     std::unique_ptr<ImageMap> image_map;
 
-    VaApiImage() = default;
+    VaApiImage();
     VaApiImage(const VaApiImage &other) = delete;
-    VaApiImage(VaApiContext *context_, int width, int height, int format);
+    VaApiImage(VaApiContext *context_, uint32_t width, uint32_t height, int format, MemoryType memory_type);
     ~VaApiImage();
 
     Image Map();
@@ -38,14 +39,18 @@ class VaApiImagePool {
     std::vector<std::unique_ptr<VaApiImage>> _images;
     std::condition_variable _free_image_condition_variable;
     std::mutex _free_images_mutex;
-    //    const size_t _pool_size;
 
   public:
     VaApiImage *AcquireBuffer();
     void ReleaseBuffer(VaApiImage *image);
-
+    struct ImageInfo {
+        uint32_t width;
+        uint32_t height;
+        FourCC format;
+        MemoryType memory_type;
+    };
     void Flush();
-    VaApiImagePool(VaApiContext *context_, size_t image_pool_size, int width, int height, int format);
+    VaApiImagePool(VaApiContext *context_, size_t image_pool_size, ImageInfo info);
 };
 
 } // namespace InferenceBackend

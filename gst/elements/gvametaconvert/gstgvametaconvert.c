@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -14,13 +14,12 @@
 #include "converters.h"
 #include "gva_caps.h"
 #include "gva_json_meta.h"
-
-#define UNUSED(x) (void)(x)
+#include "utils.h"
 
 #define ELEMENT_LONG_NAME "Metadata converter"
-#define ELEMENT_DESCRIPTION "Metadata converter"
+#define ELEMENT_DESCRIPTION "Converts the metadata structure to the JSON format."
 
-GST_DEBUG_CATEGORY_STATIC(gst_gva_meta_convert_debug_category);
+GST_DEBUG_CATEGORY(gst_gva_meta_convert_debug_category);
 #define GST_CAT_DEFAULT gst_gva_meta_convert_debug_category
 /* prototypes */
 
@@ -52,6 +51,9 @@ static guint gst_interpret_signals[LAST_SIGNAL] = {0};
 #define DEFAULT_SOURCE NULL
 #define DEFAULT_TAGS NULL
 #define DEFAULT_ADD_EMPTY_DETECTION_RESULTS FALSE
+#define DEFAULT_JSON_INDENT -1
+#define MIN_JSON_INDENT -1
+#define MAX_JSON_INDENT 10
 
 enum {
     PROP_0,
@@ -61,6 +63,7 @@ enum {
     PROP_SOURCE,
     PROP_TAGS,
     PROP_ADD_EMPTY_DETECTION_RESULTS,
+    PROP_JSON_INDENT
 };
 
 /* class initialization */
@@ -106,10 +109,10 @@ static void gst_gva_meta_convert_class_init(GstGvaMetaConvertClass *klass) {
        base_class_init if you intend to subclass this class. */
     gst_element_class_add_pad_template(
         GST_ELEMENT_CLASS(klass),
-        gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_from_string(GVA_CAPS)));
+        gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_from_string("ANY")));
     gst_element_class_add_pad_template(
         GST_ELEMENT_CLASS(klass),
-        gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gst_caps_from_string(GVA_CAPS)));
+        gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gst_caps_from_string("ANY")));
 
     gst_element_class_set_static_metadata(GST_ELEMENT_CLASS(klass), ELEMENT_LONG_NAME, "Video", ELEMENT_DESCRIPTION,
                                           "Intel Corporation");
@@ -126,15 +129,17 @@ static void gst_gva_meta_convert_class_init(GstGvaMetaConvertClass *klass) {
     element_class->change_state = GST_DEBUG_FUNCPTR(gst_gva_meta_convert_change_state);
 
     g_object_class_install_property(gobject_class, PROP_FORMAT,
-                                    g_param_spec_enum("format", "Format", "Output format for conversion. Enum: (1) \
-                                                      json GstGVAJSONMeta representing inference results. For \
-                                                      details on the schema please see the user guide.",
+                                    g_param_spec_enum("format", "Format",
+                                                      "Output format for conversion. Enum: (1) "
+                                                      "json GstGVAJSONMeta representing inference results. For "
+                                                      "details on the schema please see the user guide.",
                                                       GST_TYPE_GVA_METACONVERT_FORMAT, DEFAULT_FORMAT,
                                                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_ADD_TENSOR_DATA,
-                                    g_param_spec_boolean("add-tensor-data", "Add Tensor Data", "Add raw tensor data in \
-                                                      addition to detection and classification labels.",
+                                    g_param_spec_boolean("add-tensor-data", "Add Tensor Data",
+                                                         "Add raw tensor data in "
+                                                         "addition to detection and classification labels.",
                                                          DEFAULT_ADD_TENSOR_DATA,
                                                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
@@ -144,23 +149,31 @@ static void gst_gva_meta_convert_class_init(GstGvaMetaConvertClass *klass) {
                              DEFAULT_SIGNAL_HANDOFFS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_SOURCE,
-                                    g_param_spec_string("source", "Source URI", "User supplied URI identifying the \
-                                    media source associated with the inference results",
+                                    g_param_spec_string("source", "Source URI",
+                                                        "User supplied URI identifying the "
+                                                        "media source associated with the inference results",
                                                         DEFAULT_SOURCE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_TAGS,
                                     g_param_spec_string("tags", "Custom tags",
-                                                        "User supplied JSON object of additional properties added to \
-                                                        each frame's inference results",
+                                                        "User supplied JSON object of additional properties added to "
+                                                        "each frame's inference results",
                                                         DEFAULT_TAGS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_ADD_EMPTY_DETECTION_RESULTS,
-                                    g_param_spec_boolean("add-empty-results", "include metas with no \
-                                                         detections",
-                                                         "Add metadata when inference is run but no \
-                                                         results meet the detection threshold",
+                                    g_param_spec_boolean("add-empty-results", "include metas with no detections",
+                                                         "Add metadata when inference is run but no "
+                                                         "results meet the detection threshold",
                                                          DEFAULT_ADD_EMPTY_DETECTION_RESULTS,
                                                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+        gobject_class, PROP_JSON_INDENT,
+        g_param_spec_int(
+            "json-indent", "JSON indent",
+            "To control format of metadata output, indicate the number of spaces to indent blocks of JSON (-1 to 10).",
+            MIN_JSON_INDENT, MAX_JSON_INDENT, DEFAULT_JSON_INDENT,
+            (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
     gst_interpret_signals[SIGNAL_HANDOFF] = g_signal_new(
         "handoff", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET(GstGvaMetaConvertClass, handoff), NULL,
@@ -181,6 +194,12 @@ static void gst_gva_meta_convert_cleanup(GstGvaMetaConvert *gvametaconvert) {
         gst_video_info_free(gvametaconvert->info);
         gvametaconvert->info = NULL;
     }
+#ifdef AUDIO
+    if (gvametaconvert->audio_info) {
+        gst_audio_info_free(gvametaconvert->audio_info);
+        gvametaconvert->audio_info = NULL;
+    }
+#endif
 }
 
 static void gst_gva_meta_convert_reset(GstGvaMetaConvert *gvametaconvert) {
@@ -198,6 +217,10 @@ static void gst_gva_meta_convert_reset(GstGvaMetaConvert *gvametaconvert) {
     gvametaconvert->signal_handoffs = DEFAULT_SIGNAL_HANDOFFS;
     gst_gva_metaconvert_set_format(gvametaconvert, DEFAULT_FORMAT);
     gvametaconvert->info = NULL;
+    gvametaconvert->json_indent = DEFAULT_JSON_INDENT;
+#ifdef AUDIO
+    gvametaconvert->audio_info = NULL;
+#endif
 }
 
 static GstStateChangeReturn gst_gva_meta_convert_change_state(GstElement *element, GstStateChange transition) {
@@ -217,7 +240,6 @@ static GstStateChangeReturn gst_gva_meta_convert_change_state(GstElement *elemen
     default:
         break;
     }
-
     return ret;
 }
 
@@ -251,6 +273,10 @@ void gst_gva_meta_convert_set_property(GObject *object, guint property_id, const
     case PROP_SIGNAL_HANDOFFS:
         gvametaconvert->signal_handoffs = g_value_get_boolean(value);
         break;
+    case PROP_JSON_INDENT:
+        gvametaconvert->json_indent = g_value_get_int(value);
+        break;
+
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -281,6 +307,10 @@ void gst_gva_meta_convert_get_property(GObject *object, guint property_id, GValu
     case PROP_SIGNAL_HANDOFFS:
         g_value_set_boolean(value, gvametaconvert->signal_handoffs);
         break;
+    case PROP_JSON_INDENT:
+        g_value_set_int(value, gvametaconvert->json_indent);
+        break;
+
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -314,10 +344,28 @@ static gboolean gst_gva_meta_convert_set_caps(GstBaseTransform *trans, GstCaps *
 
     GstGvaMetaConvert *gvametaconvert = GST_GVA_META_CONVERT(trans);
     GST_DEBUG_OBJECT(gvametaconvert, "set_caps");
-    if (!gvametaconvert->info) {
-        gvametaconvert->info = gst_video_info_new();
+    GstStructure *caps = gst_caps_get_structure((const GstCaps *)incaps, 0);
+    const gchar *name = gst_structure_get_name(caps);
+    if (g_strrstr(name, "video")) {
+
+        if (!gvametaconvert->info) {
+            gvametaconvert->info = gst_video_info_new();
+        }
+        gst_video_info_from_caps(gvametaconvert->info, incaps);
     }
-    gst_video_info_from_caps(gvametaconvert->info, incaps);
+#ifdef AUDIO
+    else if (g_strrstr(name, "audio")) {
+        if (!gvametaconvert->audio_info) {
+            gvametaconvert->audio_info = gst_audio_info_new();
+        }
+        gst_audio_info_from_caps(gvametaconvert->audio_info, incaps);
+    }
+#endif
+    else {
+        GST_ERROR_OBJECT(gvametaconvert, "Invalid input caps");
+        return FALSE;
+    }
+
     return TRUE;
 }
 

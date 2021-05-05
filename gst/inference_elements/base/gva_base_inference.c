@@ -1,17 +1,23 @@
 /*******************************************************************************
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 #include "gva_base_inference.h"
 
+#include "common/pre_processors.h"
+#include "config.h"
+#include "utils.h"
+
 #define DEFAULT_MODEL NULL
 #define DEFAULT_MODEL_INSTANCE_ID NULL
 #define DEFAULT_MODEL_PROC NULL
 #define DEFAULT_DEVICE "CPU"
 #define DEFAULT_DEVICE_EXTENSIONS ""
-#define DEFAULT_PRE_PROC "ie"
+#define DEFAULT_PRE_PROC ""
+#define DEFAULT_INFERENCE_REGION FULL_FRAME
+#define DEFAULT_OBJECT_CLASS NULL
 
 #define DEFAULT_MIN_THRESHOLD 0.
 #define DEFAULT_MAX_THRESHOLD 1.
@@ -20,6 +26,7 @@
 #define DEFAULT_MIN_INFERENCE_INTERVAL 1
 #define DEFAULT_MAX_INFERENCE_INTERVAL UINT_MAX
 #define DEFAULT_INFERENCE_INTERVAL 1
+#define DEFAULT_FIRST_FRAME_NUM 0
 
 #define DEFAULT_RESHAPE FALSE
 
@@ -51,8 +58,6 @@
 
 #define DEFAULT_ALLOCATOR_NAME NULL
 
-#define UNUSED(x) (void)(x)
-
 G_DEFINE_TYPE(GvaBaseInference, gva_base_inference, GST_TYPE_BASE_TRANSFORM);
 
 enum {
@@ -72,8 +77,22 @@ enum {
     PROP_CPU_THROUGHPUT_STREAMS,
     PROP_GPU_THROUGHPUT_STREAMS,
     PROP_IE_CONFIG,
-    PROP_DEVICE_EXTENSIONS
+    PROP_DEVICE_EXTENSIONS,
+    PROP_INFERENCE_REGION,
+    PROP_OBJECT_CLASS
 };
+
+GType gst_gva_base_inference_get_inf_region(void) {
+    static GType gva_inference_region = 0;
+    static const GEnumValue inference_region_types[] = {{FULL_FRAME, "Perform inference for full frame", "full-frame"},
+                                                        {ROI_LIST, "Perform inference for roi list", "roi-list"},
+                                                        {0, NULL, NULL}};
+
+    if (!gva_inference_region) {
+        gva_inference_region = g_enum_register_static("InferenceRegionType", inference_region_types);
+    }
+    return gva_inference_region;
+}
 
 static void gva_base_inference_set_property(GObject *object, guint property_id, const GValue *value, GParamSpec *pspec);
 static void gva_base_inference_get_property(GObject *object, guint property_id, GValue *value, GParamSpec *pspec);
@@ -81,9 +100,11 @@ static void gva_base_inference_dispose(GObject *object);
 static void gva_base_inference_finalize(GObject *object);
 
 static gboolean gva_base_inference_set_caps(GstBaseTransform *trans, GstCaps *incaps, GstCaps *outcaps);
+static gboolean gva_base_inference_check_properties_correctness(GvaBaseInference *base_inference);
 static gboolean gva_base_inference_start(GstBaseTransform *trans);
 static gboolean gva_base_inference_stop(GstBaseTransform *trans);
 static gboolean gva_base_inference_sink_event(GstBaseTransform *trans, GstEvent *event);
+static gboolean gva_base_inference_propose_allocation(GstBaseTransform *trans, GstQuery *decide_query, GstQuery *query);
 
 static GstFlowReturn gva_base_inference_transform_ip(GstBaseTransform *trans, GstBuffer *buf);
 static void gva_base_inference_cleanup(GvaBaseInference *base_inference);
@@ -107,6 +128,7 @@ void gva_base_inference_class_init(GvaBaseInferenceClass *klass) {
     base_transform_class->stop = GST_DEBUG_FUNCPTR(gva_base_inference_stop);
     base_transform_class->sink_event = GST_DEBUG_FUNCPTR(gva_base_inference_sink_event);
     base_transform_class->transform_ip = GST_DEBUG_FUNCPTR(gva_base_inference_transform_ip);
+    base_transform_class->propose_allocation = GST_DEBUG_FUNCPTR(gva_base_inference_propose_allocation);
     element_class->change_state = GST_DEBUG_FUNCPTR(gva_base_inference_change_state);
 
     g_object_class_install_property(gobject_class, PROP_MODEL,
@@ -123,10 +145,11 @@ void gva_base_inference_class_init(GvaBaseInferenceClass *klass) {
 
     g_object_class_install_property(
         gobject_class, PROP_PRE_PROC_BACKEND,
-        g_param_spec_string(
-            "pre-process-backend", "Pre-processing method",
-            "Select a pre-processing method (color conversion and resize), one of 'ie', 'opencv', 'vaapi'",
-            DEFAULT_PRE_PROC, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        g_param_spec_string("pre-process-backend", "Pre-processing method",
+                            "Select a pre-processing method (color conversion, resize and crop), "
+                            "one of 'ie', 'opencv', 'vaapi', 'vaapi-surface-sharing'. If not set, it will be selected "
+                            "automatically: 'vaapi' for VASurface and DMABuf, 'ie' for SYSTEM memory.",
+                            DEFAULT_PRE_PROC, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
         gobject_class, PROP_MODEL_PROC,
@@ -138,7 +161,7 @@ void gva_base_inference_class_init(GvaBaseInferenceClass *klass) {
         gobject_class, PROP_DEVICE,
         g_param_spec_string(
             "device", "Device",
-            "Target device for inference. Please see OpenVINO documentation for list of supported devices.",
+            "Target device for inference. Please see OpenVINO™ Toolkit documentation for list of supported devices.",
             DEFAULT_DEVICE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_BATCH_SIZE,
@@ -195,23 +218,23 @@ void gva_base_inference_class_init(GvaBaseInferenceClass *klass) {
 
     g_object_class_install_property(
         gobject_class, PROP_CPU_THROUGHPUT_STREAMS,
-        g_param_spec_uint(
-            "cpu-throughput-streams", "CPU-Throughput-Streams",
-            "Sets the cpu-throughput-streams configuration key for OpenVINO's "
-            "cpu device plugin. Configuration allows for multiple inference streams "
-            "for better performance. Default mode is auto. See OpenVINO CPU plugin documentation for more details",
-            DEFAULT_MIN_CPU_THROUGHPUT_STREAMS, DEFAULT_MAX_CPU_THROUGHPUT_STREAMS, DEFAULT_CPU_THROUGHPUT_STREAMS,
-            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        g_param_spec_uint("cpu-throughput-streams", "CPU-Throughput-Streams",
+                          "Sets the cpu-throughput-streams configuration key for OpenVINO™ Toolkit's "
+                          "cpu device plugin. Configuration allows for multiple inference streams "
+                          "for better performance. Default mode is auto. See OpenVINO™ Toolkit CPU plugin "
+                          "documentation for more details",
+                          DEFAULT_MIN_CPU_THROUGHPUT_STREAMS, DEFAULT_MAX_CPU_THROUGHPUT_STREAMS,
+                          DEFAULT_CPU_THROUGHPUT_STREAMS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
         gobject_class, PROP_GPU_THROUGHPUT_STREAMS,
-        g_param_spec_uint(
-            "gpu-throughput-streams", "GPU-Throughput-Streams",
-            "Sets the gpu-throughput-streams configuration key for OpenVINO's "
-            "gpu device plugin. Configuration allows for multiple inference streams "
-            "for better performance. Default mode is auto. See OpenVINO GPU plugin documentation for more details",
-            DEFAULT_MIN_GPU_THROUGHPUT_STREAMS, DEFAULT_MAX_GPU_THROUGHPUT_STREAMS, DEFAULT_GPU_THROUGHPUT_STREAMS,
-            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        g_param_spec_uint("gpu-throughput-streams", "GPU-Throughput-Streams",
+                          "Sets the gpu-throughput-streams configuration key for OpenVINO™ Toolkit's "
+                          "gpu device plugin. Configuration allows for multiple inference streams "
+                          "for better performance. Default mode is auto. See OpenVINO™ Toolkit GPU plugin "
+                          "documentation for more details",
+                          DEFAULT_MIN_GPU_THROUGHPUT_STREAMS, DEFAULT_MAX_GPU_THROUGHPUT_STREAMS,
+                          DEFAULT_GPU_THROUGHPUT_STREAMS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
         gobject_class, PROP_IE_CONFIG,
@@ -223,8 +246,20 @@ void gva_base_inference_class_init(GvaBaseInferenceClass *klass) {
         gobject_class, PROP_DEVICE_EXTENSIONS,
         g_param_spec_string(
             "device-extensions", "ExtensionString",
-            "Comma separated list of KEY=VALUE pairs specifying the OpenVINO Inference Engine extension for a device",
+            "Comma separated list of KEY=VALUE pairs specifying the Inference Engine extension for a device",
             DEFAULT_DEVICE_EXTENSIONS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+        gobject_class, PROP_INFERENCE_REGION,
+        g_param_spec_enum("inference-region", "Inference-Region",
+                          "Identifier responsible for the region on which inference will be performed",
+                          GST_TYPE_GVA_BASE_INFERENCE_REGION, DEFAULT_INFERENCE_REGION,
+                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(
+        gobject_class, PROP_OBJECT_CLASS,
+        g_param_spec_string("object-class", "ObjectClass",
+                            "Filter for Region of Interest class label on this element input", DEFAULT_OBJECT_CLASS,
+                            (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 }
 
 void gva_base_inference_cleanup(GvaBaseInference *base_inference) {
@@ -273,10 +308,16 @@ void gva_base_inference_cleanup(GvaBaseInference *base_inference) {
     base_inference->initialized = FALSE;
 
     base_inference->num_skipped_frames = UINT_MAX - 1; // always run inference on first frame
+    base_inference->frame_num = DEFAULT_FIRST_FRAME_NUM;
+
+    if (base_inference->object_class) {
+        g_free(base_inference->object_class);
+        base_inference->object_class = NULL;
+    }
 }
 
 void gva_base_inference_init(GvaBaseInference *base_inference) {
-    GST_DEBUG_OBJECT(base_inference, "gva_base_inference_reset");
+    GST_DEBUG_OBJECT(base_inference, "gva_base_inference_init");
 
     if (base_inference == NULL)
         return;
@@ -304,12 +345,18 @@ void gva_base_inference_init(GvaBaseInference *base_inference) {
 
     base_inference->initialized = FALSE;
     base_inference->info = NULL;
-    base_inference->is_full_frame = TRUE;
+    base_inference->inference_region = DEFAULT_INFERENCE_REGION;
     base_inference->inference = NULL;
-    base_inference->is_roi_classification_needed = NULL;
+
+    base_inference->is_roi_inference_needed = IS_ROI_INFERENCE_NEEDED;
+    base_inference->specific_roi_filter = NULL;
+
     base_inference->pre_proc = NULL;
-    base_inference->get_roi_pre_proc = NULL;
+    base_inference->input_prerocessors_factory = GET_INPUT_PREPROCESSORS;
     base_inference->post_proc = NULL;
+
+    base_inference->frame_num = DEFAULT_FIRST_FRAME_NUM;
+    base_inference->object_class = DEFAULT_OBJECT_CLASS;
 }
 
 GstStateChangeReturn gva_base_inference_change_state(GstElement *element, GstStateChange transition) {
@@ -330,6 +377,16 @@ gboolean check_gva_base_inference_stopped(GvaBaseInference *base_inference) {
     is_stopped = state == GST_STATE_READY || state == GST_STATE_NULL;
     GST_OBJECT_UNLOCK(base_inference);
     return is_stopped;
+}
+
+gboolean gva_base_inference_propose_allocation(GstBaseTransform *trans, GstQuery *decide_query, GstQuery *query) {
+    UNUSED(decide_query);
+    UNUSED(trans);
+    if (query) {
+        gst_query_add_allocation_meta(query, GST_VIDEO_META_API_TYPE, NULL);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 void gva_base_inference_set_model(GvaBaseInference *base_inference, const gchar *model_path) {
@@ -419,6 +476,16 @@ void gva_base_inference_set_property(GObject *object, guint property_id, const G
         g_free(base_inference->device_extensions);
         base_inference->device_extensions = g_value_dup_string(value);
         break;
+    case PROP_INFERENCE_REGION:
+        base_inference->inference_region = g_value_get_enum(value);
+        break;
+    case PROP_OBJECT_CLASS:
+        g_free(base_inference->object_class);
+        base_inference->object_class = g_value_dup_string(value);
+        // It is necessary to update the vector of object classes
+        // after possible change of this property
+        update_inference_object_classes(base_inference);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -479,6 +546,12 @@ void gva_base_inference_get_property(GObject *object, guint property_id, GValue 
     case PROP_DEVICE_EXTENSIONS:
         g_value_set_string(value, base_inference->device_extensions);
         break;
+    case PROP_INFERENCE_REGION:
+        g_value_set_enum(value, base_inference->inference_region);
+        break;
+    case PROP_OBJECT_CLASS:
+        g_value_set_string(value, base_inference->object_class);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -518,33 +591,57 @@ gboolean gva_base_inference_set_caps(GstBaseTransform *trans, GstCaps *incaps, G
     }
     gst_video_info_from_caps(base_inference->info, incaps);
 
-    base_inference->inference = acquire_inference_instance(base_inference);
+    base_inference->caps_feature = get_caps_feature(incaps);
+    if (base_inference->inference == NULL) {
+        base_inference->inference = acquire_inference_instance(base_inference);
+        GvaBaseInferenceClass *base_inference_class = GVA_BASE_INFERENCE_GET_CLASS(base_inference);
+        if (base_inference_class->on_initialized)
+            base_inference_class->on_initialized(base_inference);
+        // We need to set the vector of object classes
+        // after InferenceImpl instance acquirement
+        update_inference_object_classes(base_inference);
+    }
 
     return base_inference->inference != NULL;
 }
 
-gboolean gva_base_inference_start(GstBaseTransform *trans) {
-    GvaBaseInference *base_inference = GVA_BASE_INFERENCE(trans);
-
-    GST_DEBUG_OBJECT(base_inference, "start");
-
+gboolean gva_base_inference_check_properties_correctness(GvaBaseInference *base_inference) {
     if (!base_inference->model_instance_id) {
         base_inference->model_instance_id = g_strdup(GST_ELEMENT_NAME(GST_ELEMENT(base_inference)));
 
         if (base_inference->model == NULL) {
             GST_ELEMENT_ERROR(base_inference, RESOURCE, NOT_FOUND, ("'model' is not set"),
                               ("'model' property is not set"));
-            goto exit;
+            return FALSE;
         } else if (!g_file_test(base_inference->model, G_FILE_TEST_EXISTS)) {
             GST_ELEMENT_ERROR(base_inference, RESOURCE, NOT_FOUND, ("'model' does not exist"),
                               ("path %s set in 'model' does not exist", base_inference->model));
-            goto exit;
+            return FALSE;
         }
     }
 
     if (base_inference->model_proc != NULL && !g_file_test(base_inference->model_proc, G_FILE_TEST_EXISTS)) {
-        GST_ELEMENT_WARNING(base_inference, RESOURCE, NOT_FOUND, ("'model-proc' does not exist"),
-                            ("path %s set in 'model-proc' does not exist", base_inference->model_proc));
+        GST_ELEMENT_ERROR(base_inference, RESOURCE, NOT_FOUND, ("'model-proc' does not exist"),
+                          ("path %s set in 'model-proc' does not exist", base_inference->model_proc));
+        return FALSE;
+    }
+
+    if (base_inference->inference_region == FULL_FRAME && base_inference->object_class &&
+        !g_str_equal(base_inference->object_class, "")) {
+        GST_ERROR_OBJECT(base_inference, ("You cannot use 'object-class' property if you set 'full-frame' for "
+                                          "'inference-region' property."));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+gboolean gva_base_inference_start(GstBaseTransform *trans) {
+    GvaBaseInference *base_inference = GVA_BASE_INFERENCE(trans);
+
+    GST_DEBUG_OBJECT(base_inference, "start");
+    if (!gva_base_inference_check_properties_correctness(base_inference)) {
+        goto exit;
     }
 
     gboolean success = registerElement(base_inference);
@@ -561,8 +658,7 @@ gboolean gva_base_inference_stop(GstBaseTransform *trans) {
     GvaBaseInference *base_inference = GVA_BASE_INFERENCE(trans);
 
     GST_DEBUG_OBJECT(base_inference, "stop");
-    // FIXME: Hangs when multichannel
-    // flush_inference(base_inference);
+    flush_inference(base_inference);
 
     return TRUE;
 }
@@ -591,7 +687,7 @@ GstFlowReturn gva_base_inference_transform_ip(GstBaseTransform *trans, GstBuffer
         return GST_FLOW_ERROR;
     }
 
-    return frame_to_base_inference(base_inference, buf, base_inference->info);
+    return frame_to_base_inference(base_inference, buf);
 
     /* return GST_FLOW_OK; FIXME shouldn't signal about dropping frames in inplace transform function*/
 }

@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -10,9 +10,12 @@ set (TARGET_NAME "elements")
 
 find_package(OpenCV REQUIRED core imgproc)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GSTREAMER gstreamer-1.0>=1.14 REQUIRED)
-pkg_check_modules(GSTVIDEO gstreamer-video-1.0>=1.14 REQUIRED)
+pkg_check_modules(GSTREAMER gstreamer-1.0>=1.16 REQUIRED)
+pkg_check_modules(GSTVIDEO gstreamer-video-1.0>=1.16 REQUIRED)
 pkg_check_modules(GSTALLOC gstreamer-allocators-1.0 REQUIRED)
+if(${ENABLE_AUDIO_INFERENCE_ELEMENTS})
+        pkg_check_modules(GSTAUDIO gstreamer-audio-1.0>=1.16 REQUIRED)
+endif()
 
 file (GLOB MAIN_SRC
     gvametaconvert/*.cpp
@@ -20,33 +23,32 @@ file (GLOB MAIN_SRC
     gvametapublish/*.cpp
     gvametapublish/*.c
     gvawatermark/*.cpp
+    gvawatermark/renderer/*.cpp
     gvawatermark/*.c
     gvafpscounter/*.cpp
     gvafpscounter/*.c
-    gvatrack/*.cpp
-    gvatrack/*.c
-    gvatrack/iou/*.cpp
+    gvametaaggregate/*.cpp
+    gvametaaggregate/*.c
 )
 
 file (GLOB MAIN_HEADERS
-    gvaidentify/*.h
     gvametaconvert/*.h
     gvametapublish/*.h
     gvawatermark/*.h
+    gvawatermark/renderer/*.h
     gvafpscounter/*.h
-    gvatrack/*.h
-    gvatrack/iou/*.h
+    gvametaaggregate/*.h
 )
 
-if(${ENABLE_VAS_TRACKER})
-    file (GLOB VAS_SRC
-        gvatrack/vas/*.cpp
+if(${ENABLE_AUDIO_INFERENCE_ELEMENTS})
+    file (GLOB AUDIO_SRC
+        gvametaconvert/audioconverter/*.cpp
     )
-    file (GLOB VAS_HEADERS
-        gvatrack/vas/*.h
+    file (GLOB AUDIO_HEADERS
+        gvametaconvert/audioconverter/*.h
     )
-    list (APPEND MAIN_SRC ${VAS_SRC})
-    list (APPEND MAIN_HEADERS ${VAS_HEADERS})
+    list (APPEND MAIN_SRC ${AUDIO_SRC})
+    list (APPEND MAIN_HEADERS ${AUDIO_HEADERS})
 endif()
 
 add_library(${TARGET_NAME} STATIC ${MAIN_SRC} ${MAIN_HEADERS})
@@ -55,46 +57,44 @@ set_compile_flags(${TARGET_NAME})
 target_include_directories(${TARGET_NAME}
 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    gvaidentify
     gvametaconvert
     gvametapublish
     gvawatermark
     gvafpscounter
-    gvatrack
-    gvatrack/iou
+    gvametaaggregate
 PRIVATE
     ${GSTREAMER_INCLUDE_DIRS}
     ${GSTVIDEO_INCLUDE_DIRS}
     ${GSTALLOC_INCLUDE_DIRS}
 )
 
-if(${ENABLE_VAS_TRACKER})
+if(${ENABLE_AUDIO_INFERENCE_ELEMENTS})
     target_include_directories(${TARGET_NAME}
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/gvatrack/vas
-    )
-
-    target_link_libraries(${TARGET_NAME}
-    PRIVATE
-        vas
+        ${CMAKE_CURRENT_SOURCE_DIR}/gvametaconvert/audioconverter
+        ${GSTAUDIO_INCLUDE_DIRS}
     )
 endif()
-
 target_link_libraries(${TARGET_NAME}
 PRIVATE
+    ${GSTREAMER_LDFLAGS}
+    ${GSTVIDEO_LDFLAGS}
+    ${GSTALLOC_LDFLAGS}
     ${OpenCV_LIBS}
-    ${GSTREAMER_LIBRARIES}
-    ${GSTVIDEO_LIBRARIES}
-    ${GSTALLOC_LIBRARIES}
     common
     image_inference
     image_inference_openvino
     logger
     json-hpp
     json-schema-validator
+    utils
 )
 
-if(${HAVE_VAAPI})
+if(${ENABLE_AUDIO_INFERENCE_ELEMENTS})
+        target_link_libraries(${TARGET_NAME} PRIVATE ${GSTAUDIO_LDFLAGS})
+endif()
+
+if(${ENABLE_VAAPI})
         target_link_libraries(${TARGET_NAME} PRIVATE image_inference_async)
 endif()
 
@@ -104,22 +104,21 @@ PRIVATE
 )
 if (MQTT)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DPAHO_INC ")
-        target_link_libraries(${TARGET_NAME} PRIVATE paho-mqtt3c uuid)
-        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_MQTT=1)
+        target_link_libraries(${TARGET_NAME} PRIVATE paho-mqtt3a uuid)
         message("MQTT support will be available in metapublish element")
 else()
-        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_MQTT=0)
         message("MQTT support will not be available. Ensure required libraries (Paho MQTT) are installed, and rebuild plugin with -DMQTT=1 before attempting to use MQTT")
 endif()
 
 if (KAFKA)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKAFKA_INC ")
         target_link_libraries(${TARGET_NAME} PRIVATE rdkafka)
-        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_KAFKA=1)
         message("Kafka support will be available in metapublish element")
 else()
-        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_KAFKA=0)
         message("Kafka support will not be available. Ensure required libraries (librdkafka) are installed, and rebuild plugin with -DKAFKA=1 before attempting to use Kafka")
 endif()
 
 add_subdirectory(gvapython)
+if(${ENABLE_VAS_TRACKER})
+    add_subdirectory(gvatrack)
+endif()

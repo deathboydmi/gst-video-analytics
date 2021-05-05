@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -9,7 +9,7 @@ cmake_minimum_required (VERSION 3.1)
 set (TARGET_NAME "gstvideoanalytics")
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GSTREAMER gstreamer-1.0>=1.14 REQUIRED)
+pkg_check_modules(GSTREAMER gstreamer-1.0>=1.16 REQUIRED)
 
 file (GLOB MAIN_SRC
     register_elements.c
@@ -32,7 +32,7 @@ PRIVATE
 
 target_link_libraries(${TARGET_NAME}
 PRIVATE
-    ${GSTREAMER_LIBRARIES}
+    ${GSTREAMER_LDFLAGS}
     common
     elements
     inference_elements

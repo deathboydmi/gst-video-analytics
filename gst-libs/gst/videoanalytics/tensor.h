@@ -13,8 +13,10 @@
 #define __TENSOR_H__
 
 #include "metadata/gva_tensor_meta.h"
+
 #include <gst/gst.h>
 #include <gst/video/gstvideometa.h>
+
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -35,6 +37,9 @@ namespace GVA {
  */
 class Tensor {
     friend class VideoFrame;
+#ifdef AUDIO
+    friend class AudioFrame;
+#endif
 
   public:
     /**
