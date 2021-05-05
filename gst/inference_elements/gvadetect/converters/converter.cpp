@@ -3,7 +3,10 @@
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
+
 #include "converter.h"
+
+#include "converters/ov_default_2.h"
 #include "converters/ssd.h"
 #include "converters/yolo_base.h"
 
@@ -193,6 +196,12 @@ Converter *Converter::create(const GstStructure *output_model_proc_info, const M
     }
     if (converter_type == "tensor_to_bbox_ssd") {
         return new SSDConverter();
+    }
+    if (converter_type == "tensor_to_bbox_ov") {
+        return new SSDConverter();
+    }
+    if (converter_type == "tensor_to_bbox_ov_2") {
+        return new OVDefault2Converter();
     }
 
     if (converter_type == "tensor_to_bbox_yolo_v2" or converter_type == "tensor_to_bbox_yolo_v3") {
