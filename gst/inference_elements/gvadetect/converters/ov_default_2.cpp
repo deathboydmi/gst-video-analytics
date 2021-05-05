@@ -83,7 +83,7 @@ bool OVDefault2Converter::process(const std::map<std::string, InferenceBackend::
         if (not bboxes_data)
             throw std::invalid_argument("Output blob data is nullptr");
 
-        const float *labels_data = reinterpret_cast<const float *>(labels->GetData());
+        const uint64_t *labels_data = reinterpret_cast<const uint64_t *>(labels->GetData());
         if (not labels_data)
             throw std::invalid_argument("Output blob data is nullptr");
 
@@ -96,7 +96,7 @@ bool OVDefault2Converter::process(const std::map<std::string, InferenceBackend::
                 continue;
             }
 
-            const size_t label_id = static_cast<size_t>(labels_data[i]);
+            const uint64_t label_id = static_cast<uint64_t>(labels_data[i]);
 
             const float bbox_x = bboxes_data[i * supported_bbox_size + 0] / input_info.width;
             const float bbox_y = bboxes_data[i * supported_bbox_size + 1] / input_info.height;
