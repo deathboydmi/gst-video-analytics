@@ -73,12 +73,12 @@ echo -e "\e[32mRunning sample with the following parameters:\e[0m"
 echo GST_PLUGIN_PATH=${GST_PLUGIN_PATH}
 
 PIPELINE="gst-launch-1.0 \
-          ${SOURCE_ELEMENT} ! decodebin ! videoconvert ! video/x-raw,format=BGRx ! \
+          ${SOURCE_ELEMENT} ! qtdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGRx ! \
           gvadetect model=$DETECT_MODEL_PATH device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
           gvaclassify reclassify-interval=5 model=$LANDMARKS_MODEL_PATH model-proc=$(PROC_PATH $LANDMARKS_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
           gvaclassify reclassify-interval=5 model=$IDENTIFICATION_MODEL_PATH model-proc=$(PROC_PATH $IDENTIFICATION_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
           gvaidentify gallery=${GALLERY} ! queue ! \
-          gvawatermark ! videoconvert ! fpsdisplaysink video-sink=xvimagesink sync=false"
+          gvawatermark ! videoconvert ! fpsdisplaysink video-sink=ximagesink sync=false"
 echo -e "\e[32mPipeline:\e[0m"
 echo ${PIPELINE}
 

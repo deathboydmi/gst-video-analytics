@@ -29,6 +29,8 @@ file (GLOB MAIN_SRC
     gvafpscounter/*.c
     gvametaaggregate/*.cpp
     gvametaaggregate/*.c
+    gvaidentify/*.cpp
+    gvaidentify/*.c
 )
 
 file (GLOB MAIN_HEADERS
@@ -38,6 +40,7 @@ file (GLOB MAIN_HEADERS
     gvawatermark/renderer/*.h
     gvafpscounter/*.h
     gvametaaggregate/*.h
+    gvaidentify/*.h
 )
 
 if(${ENABLE_AUDIO_INFERENCE_ELEMENTS})
@@ -62,6 +65,7 @@ PUBLIC
     gvawatermark
     gvafpscounter
     gvametaaggregate
+    gvaidentify
 PRIVATE
     ${GSTREAMER_INCLUDE_DIRS}
     ${GSTVIDEO_INCLUDE_DIRS}

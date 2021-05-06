@@ -101,9 +101,9 @@ def find_models_paths(model_names, models_dir_list):
 
 pipeline_template = "gst-launch-1.0 \
         filesrc location={input_file} ! decodebin ! videoconvert ! video/x-raw,format=BGRx ! \
-        gvadetect model={detection_model} pre-process-backend=opencv ! \
-        gvaclassify model={landmarks_model} model-proc={landmarks_modelproc} pre-process-backend=opencv ! \
-        gvaclassify model={identification_model} model-proc={identification_modelproc} pre-process-backend=opencv ! \
+        gvadetect name=face_detection model={detection_model} model-proc={detection_modelproc} pre-process-backend=ie threshold=0.3 ! \
+        gvaclassify name=landmarks model={landmarks_model} model-proc={landmarks_modelproc} pre-process-backend=ie ! \
+        gvaclassify name=identify model={identification_model} model-proc={identification_modelproc} pre-process-backend=opencv ! \
         gvapython module=" + os.path.realpath(__file__) + ' class=Processor arg=[\\"{output_file}\\"] ! \
         fakesink sync=false'
 feature_file_regexp_template = r"^{label}_\d+.tensor$"
@@ -118,6 +118,8 @@ models_paths = find_models_paths(
 default_detection_path = models_paths.get(default_detection_model)
 default_identification_path = models_paths.get(default_identification_model)
 default_landmarks_path = models_paths.get(default_landmarks_model)
+default_detection_modelproc_path = "../../model_proc/{}.json".format(
+    default_detection_model)
 default_identification_modelproc_path = "../../model_proc/{}.json".format(
     default_identification_model)
 default_landmarks_modelproc_path = "../../model_proc/{}.json".format(
@@ -137,6 +139,8 @@ def parse_arg():
         "--output", "-o", default=default_output, help="Path to output folder")
     parser.add_argument("--detection", "-d", default=default_detection_path,
                         help="Path to detection model xml file")
+    parser.add_argument("--detection_modelproc", default=default_detection_modelproc_path,
+                        help="Path to detection modelproc json file")
     parser.add_argument("--identification", "-i", default=default_identification_path,
                         help="Path to identification model xml file")
     parser.add_argument("--landmarks_regression", "-l", default=default_landmarks_path,
@@ -170,7 +174,9 @@ if __name__ == "__main__":
             label = os.path.splitext(
                 filename)[0] if folder == args.source_dir else os.path.basename(folder)
             abs_path = os.path.join(os.path.abspath(folder), filename)
-            pipeline = pipeline_template.format(input_file=abs_path, detection_model=args.detection,
+            pipeline = pipeline_template.format(input_file=abs_path,
+                                                detection_model=args.detection,
+                                                detection_modelproc=args.detection_modelproc,
                                                 landmarks_model=args.landmarks_regression,
                                                 landmarks_modelproc=args.landmarks_regression_modelproc,
                                                 identification_model=args.identification,

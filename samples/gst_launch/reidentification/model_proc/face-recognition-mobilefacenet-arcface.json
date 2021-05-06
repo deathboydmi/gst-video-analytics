@@ -1,10 +1,9 @@
 {
-  "json_schema_version": "2.0.0",
+  "json_schema_version": "1.0.0",
   "input_preproc": [
     {
-      "format": "image",
       "layer_name": "0",
-      "precision": "U8",
+      "color_format": "BGR",
       "converter": "alignment",
       "alignment_points": [
         0.31556875000000000,
@@ -22,7 +21,6 @@
   ],
   "output_postproc": [
     {
-      "layer_name": "658",
       "attribute_name": "face_id",
       "format": "cosine_distance"
     }

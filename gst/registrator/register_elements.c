@@ -11,6 +11,7 @@
 #include "gstgvaclassify.h"
 #include "gstgvadetect.h"
 #include "gstgvafpscounter.h"
+#include "gstgvaidentify.h"
 #include "gstgvainference.h"
 #include "gstgvametaaggregate.h"
 #include "gstgvametaconvert.h"
@@ -43,6 +44,9 @@ static gboolean plugin_init(GstPlugin *plugin) {
         return FALSE;
 
     if (!gst_element_register(plugin, "gvametaaggregate", GST_RANK_NONE, GST_TYPE_GVA_META_AGGREGATE))
+        return FALSE;
+
+    if (!gst_element_register(plugin, "gvaidentify", GST_RANK_NONE, GST_TYPE_GVA_IDENTIFY))
         return FALSE;
 
     // register metadata
