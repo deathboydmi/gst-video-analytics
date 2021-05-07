@@ -47,12 +47,12 @@ if [ ! -f ${GALLERY} ]; then
   exit 1
 fi
 
-DETECTION_MODEL=face-detection-adas-0001
+DETECTION_MODEL=face-detection-0200
 LANDMARKS_MODEL=landmarks-regression-retail-0009
-IDENTIFICATION_MODEL=face-reidentification-retail-0095
+IDENTIFICATION_MODEL=face-recognition-mobilefacenet-arcface
 
 LANDMARKS_MODEL_PROC=landmarks-regression-retail-0009
-IDENTIFICATION_MODEL_PROC=face-reidentification-retail-0095
+IDENTIFICATION_MODEL_PROC=face-recognition-mobilefacenet-arcface
 
 DEVICE=CPU
 PRE_PROC=opencv
@@ -74,11 +74,11 @@ echo GST_PLUGIN_PATH=${GST_PLUGIN_PATH}
 
 PIPELINE="gst-launch-1.0 \
           ${SOURCE_ELEMENT} ! qtdemux ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGRx ! \
-          gvadetect model=$DETECT_MODEL_PATH device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
-          gvaclassify reclassify-interval=5 model=$LANDMARKS_MODEL_PATH model-proc=$(PROC_PATH $LANDMARKS_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
-          gvaclassify reclassify-interval=5 model=$IDENTIFICATION_MODEL_PATH model-proc=$(PROC_PATH $IDENTIFICATION_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
+          gvadetect model=$DETECT_MODEL_PATH device=$DEVICE pre-process-backend=$PRE_PROC threshold=0.4 ! queue ! \
+          gvaclassify model=$LANDMARKS_MODEL_PATH model-proc=$(PROC_PATH $LANDMARKS_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
+          gvaclassify model=$IDENTIFICATION_MODEL_PATH model-proc=$(PROC_PATH $IDENTIFICATION_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
           gvaidentify gallery=${GALLERY} ! queue ! \
-          gvawatermark ! videoconvert ! fpsdisplaysink video-sink=ximagesink sync=false"
+          gvawatermark ! gvafpscounter ! videoconvert ! ximagesink sync=false"
 echo -e "\e[32mPipeline:\e[0m"
 echo ${PIPELINE}
 
