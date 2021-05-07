@@ -84,14 +84,28 @@ void Identify::ProcessOutput(GstBuffer *buffer) {
 }
 
 GstFlowReturn frame_to_identify(GstGvaIdentify *ovino, GstBuffer *buf) {
-    ovino->identifier->ProcessOutput(buf);
+    try {
+        ovino->identifier->ProcessOutput(buf);
+    } catch (const std::exception &e) {
+        GST_ELEMENT_ERROR(ovino, RESOURCE, SETTINGS, ("frame_to_identify has been failed."), ("%s", e.what()));
+        return GST_FLOW_ERROR;
+    }
     return GST_FLOW_OK;
 }
 
 Identify *identifier_new(GstGvaIdentify *ovino) {
-    return new Identify(ovino);
+    try {
+        return new Identify(ovino);
+    } catch (const std::exception &e) {
+        GST_ELEMENT_ERROR(ovino, RESOURCE, SETTINGS, ("identifier_delete has been failed."), ("%s", e.what()));
+        return nullptr;
+    }
 }
 
 void identifier_delete(Identify *identifier) {
-    delete identifier;
+    try {
+        delete identifier;
+    } catch (const std::exception &e) {
+        GST_ERROR("identifier_delete has been failed:%s", e.what());
+    }
 }
