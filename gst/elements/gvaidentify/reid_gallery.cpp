@@ -21,7 +21,6 @@
 #include <string>
 #include <vector>
 
-#include "inference_backend/safe_arithmetic.h"
 #include <json-schema.hpp>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
@@ -30,18 +29,14 @@ using json = nlohmann::json;
 using nlohmann::json_schema::json_validator;
 
 namespace {
-float ComputeReidDistance(const cv::Mat &descr1, const cv::Mat &descr2) {
-    float xx = safe_convert<float>(descr1.dot(descr1));
-    float yy = safe_convert<float>(descr2.dot(descr2));
-    float xy = safe_convert<float>(descr1.dot(descr2));
-    float norm = sqrt(xx * yy) + 1e-6f;
-    float cosine_similarity = xy / norm;
-    return cosine_similarity;
+bool file_exists(const std::string &path) {
+    std::ifstream f(path);
+    return f.good();
 }
 
-bool file_exists(const std::string &name) {
-    std::ifstream f(name.c_str());
-    return f.good();
+size_t file_num_bytes(const std::string &path) {
+    std::ifstream f(path, std::ifstream::binary | std::ifstream::ate);
+    return f.tellg();
 }
 
 inline char separator() {
@@ -73,15 +68,18 @@ EmbeddingsGallery::EmbeddingsGallery(GstBaseTransform *base_transform, std::stri
                           ("Cannot open gallery file: %s.", ids_list.c_str()));
         return;
     }
+
     json gallery_json;
     if (!json::accept(input_file)) {
         GST_ELEMENT_ERROR(base_transform, RESOURCE, SETTINGS, ("gallery file is not json"),
                           ("gallery file %s is not proper json", ids_list.c_str()));
         return;
     }
+
     input_file.seekg(0, input_file.beg);
     input_file >> gallery_json;
     input_file.close();
+
     json_validator validator;
     try {
         validator.set_root_schema(GALLERY_SCHEMA);
@@ -99,46 +97,57 @@ EmbeddingsGallery::EmbeddingsGallery(GstBaseTransform *base_transform, std::stri
     }
 
     int id = 0;
-    for (json::iterator jit = gallery_json.begin(); jit != gallery_json.end(); jit++) {
-        const int tensor_mat_rows = 256;
-        const int tensor_mat_num_bytes = 1024;
-        json item = *jit;
-        std::string label = item["name"];
+    for (const auto &item : gallery_json) {
         std::vector<cv::Mat> features;
-        json features_array = item["features"];
-        for (guint i = 0; i < features_array.size(); i++) {
-            std::string path;
-            path = features_array[i].dump();
+
+        const auto &features_array = item["features"];
+        for (const auto &feature : features_array) {
+            std::string path = feature.dump();
+
             path.erase(path.begin());
             path.erase(path.end() - 1);
             if (!file_exists(path)) {
                 path = folder_name(ids_list) + separator() + path;
             }
+
+            const size_t embending_size = file_num_bytes(path);
+            const size_t tensor_mat_rows = embending_size / sizeof(float);
+            if (embending_size % sizeof(float)) {
+                GST_ELEMENT_ERROR(base_transform, RESOURCE, SETTINGS, ("Tensor file is wrong size"),
+                                  ("Tensor file is wrong size for file %s.", path.c_str()));
+                return;
+            }
+
             std::ifstream input(path, std::ifstream::binary);
-            if (input) {
-                cv::Mat emb(tensor_mat_rows, 1, CV_32F);
-                if (emb.total() != tensor_mat_rows) {
-                    GST_ELEMENT_ERROR(base_transform, RESOURCE, SETTINGS, ("Tensor file is wrong size"),
+            if (not input) {
+                GST_ERROR("Failed to open feature file: %s", path.c_str());
+                return;
+            }
+
+            cv::Mat emb(tensor_mat_rows, 1, CV_32F);
+            if (emb.total() != tensor_mat_rows) {
+                GST_ELEMENT_ERROR(base_transform, RESOURCE, SETTINGS, ("Tensor file is wrong size"),
+                                  ("Tensor file %s has invalid data", path.c_str()));
+                return;
+            }
+
+            input.read((char *)emb.data, embending_size);
+
+            for (int i = 0; i < emb.rows; i++) {
+                if (emb.at<float>(i, 0) != emb.at<float>(i, 0)) {
+                    GST_ELEMENT_ERROR(base_transform, RESOURCE, SETTINGS, ("Tensor file has NaN"),
                                       ("Tensor file %s has invalid data", path.c_str()));
                     return;
                 }
-                input.read((char *)emb.data, tensor_mat_num_bytes);
-
-                for (int i = 0; i < emb.rows; i++) {
-                    if (emb.at<float>(i, 0) != emb.at<float>(i, 0)) {
-                        GST_ELEMENT_ERROR(base_transform, RESOURCE, SETTINGS, ("Tensor file has NaN"),
-                                          ("Tensor file %s has invalid data", path.c_str()));
-                        return;
-                    }
-                }
-
-                features.push_back(emb);
-                idx_to_id.push_back(id);
-            } else {
-                GST_ERROR("Failed to open feature file: %s", path.c_str());
             }
+
+            features.push_back(emb);
+            idx_to_id.push_back(id);
         }
+        const std::string &label = item["name"];
+
         identities.emplace_back(features, label, id);
+
         ++id;
     }
 }
@@ -152,8 +161,10 @@ std::vector<std::pair<int, float>> EmbeddingsGallery::GetIDsByEmbeddings(const s
     for (size_t i = 0; i < safe_convert<size_t>(distances.rows); i++) {
         size_t k = 0;
         for (size_t j = 0; j < identities.size(); j++) {
-            for (const auto &reference_emb : identities[j].embeddings) {
-                distances.at<float>(i, k) = ComputeReidDistance(embeddings[i], reference_emb);
+            for (size_t l = 0; l < identities[j].embeddings.size(); ++l) {
+                const auto &reference_emb = identities[j].embeddings[l];
+                const auto &reference_emb_size = identities[j].embedding_sizes[l];
+                distances.at<float>(i, k) = ComputeCosineDistance(embeddings[i], reference_emb, reference_emb_size);
                 k++;
             }
         }

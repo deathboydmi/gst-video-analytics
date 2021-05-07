@@ -13,23 +13,32 @@
 
 #pragma once
 
+#include "inference_backend/safe_arithmetic.h"
+
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
+
+#include <opencv2/core/core.hpp>
+
 #include <map>
 #include <string>
 #include <vector>
 
-#include <opencv2/core/core.hpp>
-
-#define GALLERY_MAGIC_VALUE 0x47166923
-
 struct GalleryObject {
-    std::vector<cv::Mat> embeddings;
-    std::string label;
-    int id;
+    const std::vector<cv::Mat> embeddings;
+    const std::string label;
+    const int id;
+
+    std::vector<float> embedding_sizes;
 
     GalleryObject(const std::vector<cv::Mat> &embeddings, const std::string &label, int id)
         : embeddings(embeddings), label(label), id(id) {
+        embedding_sizes.clear();
+
+        for (const auto &embedding : embeddings) {
+            float size = safe_convert<float>(embedding.dot(embedding));
+            embedding_sizes.push_back(size);
+        }
     }
 };
 
@@ -42,6 +51,16 @@ class EmbeddingsGallery {
     std::vector<std::pair<int, float>> GetIDsByEmbeddings(const std::vector<cv::Mat> &embeddings) const;
     std::string GetLabelByID(int id) const;
     std::vector<std::string> GetIDToLabelMap() const;
+
+  protected:
+    float ComputeCosineDistance(const cv::Mat &descr1, const cv::Mat &descr2, float reference_emb_size) const {
+        float xx = safe_convert<float>(descr1.dot(descr1));
+        float yy = reference_emb_size;
+        float xy = safe_convert<float>(descr1.dot(descr2));
+        float norm = sqrt(xx * yy) + 1e-6f;
+        float cosine_similarity = xy / norm;
+        return cosine_similarity;
+    }
 
   private:
     std::vector<int> idx_to_id;
