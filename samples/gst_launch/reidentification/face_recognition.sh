@@ -49,10 +49,10 @@ fi
 
 DETECTION_MODEL=face-detection-0200
 LANDMARKS_MODEL=landmarks-regression-retail-0009
-IDENTIFICATION_MODEL=face-recognition-mobilefacenet-arcface
+IDENTIFICATION_MODEL=face-recognition-resnet100-arcface
 
 LANDMARKS_MODEL_PROC=landmarks-regression-retail-0009
-IDENTIFICATION_MODEL_PROC=face-recognition-mobilefacenet-arcface
+IDENTIFICATION_MODEL_PROC=face-recognition-resnet100-arcface
 
 DEVICE=CPU
 PRE_PROC=opencv
@@ -78,7 +78,8 @@ PIPELINE="gst-launch-1.0 \
           gvaclassify model=$LANDMARKS_MODEL_PATH model-proc=$(PROC_PATH $LANDMARKS_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
           gvaclassify model=$IDENTIFICATION_MODEL_PATH model-proc=$(PROC_PATH $IDENTIFICATION_MODEL_PROC) device=$DEVICE pre-process-backend=$PRE_PROC ! queue ! \
           gvaidentify gallery=${GALLERY} ! queue ! \
-          gvawatermark ! gvafpscounter ! videoconvert ! ximagesink sync=false"
+          gvametaconvert add-tensor-data=true ! gvametapublish method=file file-path=./result_${IDENTIFICATION_MODEL}.json file-format=json ! queue ! \
+          gvawatermark ! gvafpscounter ! videoconvert ! xvimagesink sync=false"
 echo -e "\e[32mPipeline:\e[0m"
 echo ${PIPELINE}
 

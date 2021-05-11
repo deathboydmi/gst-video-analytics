@@ -46,6 +46,9 @@ json convert_tensor(const GVA::Tensor &s_tensor) {
     if (s_tensor.has_field("label_id")) {
         jobject.push_back(json::object_t::value_type("label_id", s_tensor.get_int("label_id")));
     }
+    if (s_tensor.has_field("cos_dist")) {
+        jobject.push_back(json::object_t::value_type("cos_dist", s_tensor.get_double("cos_dist")));
+    }
     json data_array;
     if (s_tensor.precision() == GVA::Tensor::Precision::U8) {
         const std::vector<uint8_t> data = s_tensor.data<uint8_t>();
